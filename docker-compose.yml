@@ -1,0 +1,49 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0  # Use a specific version for stability
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  producer_app:
+    build: ./backend        # Changed from . to ./backend
+    depends_on: [kafka]
+    command: python Producer.py
+
+  consumer_app:
+    build: ./backend        # Changed from . to ./backend
+    depends_on: [kafka]
+    volumes:
+      - ./data:/data        # Maps your local 'data' folder to the container
+    command: python Consumer.py
+
+  backend_api:
+    build: ./backend        # Changed from . to ./backend
+    depends_on: [kafka]
+    ports: ["8000:8000"]
+    volumes:
+      - ./data:/data
+    command: uvicorn api:app --host 0.0.0.0 --port 8000
+  
+  frontend_app:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    stdin_open: true # Keeps the React server interactive
+    environment:
+      - CHOKIDAR_USEPOLLING=true # Ensures hot-reload works on Macs/Docker
+    depends_on:
+      - backend_api

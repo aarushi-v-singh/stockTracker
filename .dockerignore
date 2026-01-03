@@ -1,0 +1,6 @@
+.venv
+venv
+__pycache__
+.git
+frontend/node_modules
+data/*.csv
