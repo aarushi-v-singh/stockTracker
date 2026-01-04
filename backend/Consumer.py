@@ -1,47 +1,27 @@
-from confluent_kafka import Consumer, KafkaError
-import csv
+from confluent_kafka import Consumer
+import json
 import os
 from datetime import datetime
 
-# IMPORTANT: We use /data/ because we will mount a shared folder here in Docker
-csv_file = "/data/data.csv"
-
-conf = {
-    # 'kafka' is the service name in docker-compose
-    'bootstrap.servers': 'kafka:29092', 
-    'group.id': 'my-group',
-    'auto.offset.reset': 'earliest'
-}
-
+conf = {'bootstrap.servers': 'kafka:29092', 'group.id': 'storage-group', 'auto.offset.reset': 'earliest'}
 consumer = Consumer(conf)
-topic = 'conn-events'
-consumer.subscribe([topic])
+consumer.subscribe(['stock-topic'])
 
-print("Consumer started... waiting for messages.")
+print("Data Consumer started...")
 
 while True:
     msg = consumer.poll(1.0)
-    if msg is None:
-        continue
-    if msg.error():
-        if msg.error().code() == KafkaError._PARTITION_EOF:
-           print('Reached end of partition')
-        else:
-            print(f'Error: {msg.error()}')
-    else:
-        price_val = msg.value().decode("utf-8")
-        print(f'Received: {price_val}')
+    if msg is None: continue
+    
+    try:
+        data = json.loads(msg.value().decode('utf-8'))
+        ticker = data['ticker']
+        price = data['price']
+        timestamp = datetime.now().isoformat() # Fixed: datetime is now imported
         
-        # Format: [Time, Price]
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        data_row = [timestamp, price_val]
-        
-        # Check if file exists to write header
-        file_exists = os.path.isfile(csv_file)
-        
-        # Use 'a' for append mode
-        with open(csv_file, mode="a", newline="") as file:
-            writer = csv.writer(file)
-            if not file_exists:
-                writer.writerow(["time", "price"]) # Header
-            writer.writerow(data_row)
+        os.makedirs('/data', exist_ok=True)
+        with open('/data/data.csv', 'a') as f:
+            f.write(f"{ticker},{timestamp},{price}\n")
+    except Exception as e:
+        print(f"Consumer Error: {e}")
+    

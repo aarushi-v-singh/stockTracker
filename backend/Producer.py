@@ -1,45 +1,41 @@
-from confluent_kafka import Producer
-import time
-import requests
+import asyncio
+import aiohttp
 import json
+from confluent_kafka import Producer
 
-# Kafka producer config
-conf = {
-    # 'kafka' is the service name from docker-compose
-    'bootstrap.servers': 'kafka:29092', 
-    'client.id': 'stock-price-producer'
-}
+# Synchronized list of 20 tickers
+TICKERS = [
+    "BTC-USD", "ETH-USD", "AAPL", "NVDA", "TSLA", "MSFT", "GOOGL", "AMZN", 
+    "META", "BRK-B", "UNH", "V", "JNJ", "WMT", "JPM", "PG", "MA", "LLY", "AVGO", "HD"
+]
 
-producer = Producer(conf)
-topic = 'conn-events'
-ticker_symbol = 'BTC-USD'
+conf = {'bootstrap.servers': 'kafka:29092'}
+p = Producer(conf)
 
-headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...',
-    'Content-Type': 'application/json'
-}
-
-def fetch_and_send_stock_price():
-    print(f"Starting producer for {ticker_symbol}...")
-    while True:
-        try:
-            url = f'https://query2.finance.yahoo.com/v8/finance/chart/{ticker_symbol}'
-            response = requests.get(url, headers=headers)
-            
-            if response.status_code == 200:
-                data = response.json()
+async def fetch_price(session, ticker):
+    url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
+    try:
+        async with session.get(url, timeout=5) as response:
+            if response.status == 200:
+                data = await response.json()
                 price = data["chart"]["result"][0]["meta"]["regularMarketPrice"]
                 
-                producer.produce(topic, key=ticker_symbol, value=str(price))
-                producer.flush()
-                print(f"✅ Sent {ticker_symbol} price to Kafka: {price}")
-            else:
-                print(f"❌ Yahoo API Error {response.status_code}: might be blocking the request.")
-                
-        except Exception as e:
-            print(f"Error: {e}")
+                payload = {"ticker": ticker, "price": price}
+                # Using ticker as key ensures all data for one stock stays in order
+                p.produce('stock-topic', key=ticker, value=json.dumps(payload))
+                return True
+    except Exception as e:
+        print(f"Error fetching {ticker}: {e}")
+    return False
 
-        time.sleep(5)
+async def main():
+    async with aiohttp.ClientSession(headers={'User-Agent': 'Mozilla/5.0'}) as session:
+        while True:
+            print(f"Fetching {len(TICKERS)} tickers...")
+            tasks = [fetch_price(session, t) for t in TICKERS]
+            await asyncio.gather(*tasks)
+            p.flush()
+            await asyncio.sleep(5) 
 
 if __name__ == "__main__":
-    fetch_and_send_stock_price()
+    asyncio.run(main())
